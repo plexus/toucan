@@ -162,11 +162,12 @@
        :update (fn [obj _]
                  (assoc obj :updated-at (java.sql.Timestamp. (System/currentTimeMillis)))))"
   {:style/indent 1}
-  [k & {:keys [insert update select]}]
+  [k & {:keys [insert update select query]}]
   {:pre [(or (not insert) (fn? insert))
          (or (not update) (fn? update))
-         (or (not select) (fn? select))]}
-  (swap! property-fns assoc k {:insert insert, :update update, :select select}))
+         (or (not select) (fn? select))
+         (or (not query)  (fn? query))]}
+  (swap! property-fns assoc k {:insert insert, :update update, :select select, :query query}))
 
 
 ;;;                                                    IModel Interface
@@ -280,7 +281,16 @@
                 {col ((get-in @type-fns [type direction]) v)}))))
 
 (defn- apply-property-fns
-  [context obj]
+  [obj context]
+  (loop [obj obj, [[k v] & more] (seq (properties obj))]
+    (let [f (get-in @property-fns [k context])]
+      (cond
+        (not k) obj
+        f       (recur (f obj v) more)
+        :else   (recur obj       more)))))
+
+(defn- apply-property-fns
+  [obj context]
   (loop [obj obj, [[k v] & more] (seq (properties obj))]
     (let [f (get-in @property-fns [k context])]
       (cond
@@ -294,6 +304,15 @@
   (^:private map-> [klass, ^clojure.lang.IPersistentMap m]
    "Convert map M to instance of record type KLASS."))
 
+(defn do-query [model query]
+  (let [apply-property (fn [query [prop-name _]]
+                         (let [f (get-in @property-fns [prop-name :query])]
+                           (cond-> query f f)))
+        query (merge {:select (or (default-fields model) [:*])
+                      :from   [model]}
+                     query)]
+    (reduce apply-property query (properties model))))
+
 ;; these functions call (map-> model ...) twice to make sure functions like pre-insert/post-select
 ;; didn't do something that accidentally removed the typing
 
@@ -305,7 +324,7 @@
     (pre-insert <>)
     (map-> model <>)
     (apply-type-fns <> :in)
-    (apply-property-fns :insert <>)))
+    (apply-property-fns <> :insert)))
 
 (defn do-pre-update
   "Don't call this directly! Apply internal functions like `pre-update` before updating an object in the DB."
@@ -315,7 +334,7 @@
     (pre-update <>)
     (map-> model <>)
     (apply-type-fns <> :in)
-    (apply-property-fns :update <>)))
+    (apply-property-fns <> :update)))
 
 (defn do-post-select
   "Don't call this directly! Apply internal functions like `post-select` when an object is retrieved from the DB."
@@ -325,7 +344,7 @@
     (apply-type-fns <> :out)
     (post-select <>)
     (map-> model <>)
-    (apply-property-fns :select <>)))
+    (apply-property-fns <> :select)))
 
 (def IModelDefaults
   "Default implementations for `IModel` methods."

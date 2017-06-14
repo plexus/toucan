@@ -298,10 +298,7 @@
   {:style/indent 1}
   [model honeysql-form]
   (let [model (resolve-model model)]
-    (do-post-select model (query (merge {:select (or (models/default-fields model)
-                                                      [:*])
-                                          :from   [model]}
-                                         honeysql-form)))))
+    (do-post-select model (query (models/do-query model honeysql-form)))))
 
 (defn simple-select-one
   "Select a single object from the database.
